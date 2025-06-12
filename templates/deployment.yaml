@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deployment-helm-chart.fullname" . }}
+  labels:
+    {{- include "deployment-helm-chart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ include "deployment-helm-chart.replicaCount" . }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 25%
+  selector:
+    matchLabels:
+      {{- include "deployment-helm-chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "deployment-helm-chart.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "deployment-helm-chart.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository | default "busybox" }}:{{ .Values.image.tag | default "stable" }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--spring.profiles.active={{ if eq .Values.environment "production" }}prd{{ else }}dev{{ end }}"
+          ports:
+            - name: http-api
+              containerPort: 8080
+              protocol: TCP
+            - name: http-logs
+              containerPort: 8081
+              protocol: TCP
+            - name: http-soap
+              containerPort: 8082
+              protocol: TCP
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SECRET_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "deployment-helm-chart.fullname" . }}-secret
+                  key: username
+            - name: SECRET_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "deployment-helm-chart.fullname" . }}-secret
+                  key: password
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: "/app/config.json"
+              subPath: "config.json"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "wget http://localhost:8080/service/shutdown"]
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "deployment-helm-chart.fullname" . }}-configmap
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
