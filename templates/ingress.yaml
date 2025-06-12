@@ -1,0 +1,44 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "deployment-helm-chart.fullname" . }}
+  labels:
+    {{- include "deployment-helm-chart.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    {{- /*
+        First, we validate that the required values exist.
+        The .Values.environment key must be set.
+    */}}
+    {{- $env := .Values.environment | required "The '.Values.environment' key is required in your values.yaml (e.g., 'staging', 'production')" -}}
+
+    {{- /*
+        Next, we get the host configuration for the specified environment.
+        The 'fail' function provides a clear error if the environment is not defined under ingress.hosts.
+    */}}
+    {{- $hostConfig := get .Values.ingress.hosts $env | default (dict) -}}
+    {{- if not $hostConfig.host }}
+      {{- fail (printf "No host configuration found for environment '%s' in .Values.ingress.hosts" $env) -}}
+    {{- end }}
+
+    - host: {{ $hostConfig.host | quote }}
+      http:
+        paths:
+          {{- range $hostConfig.paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "deployment-helm-chart.fullname" $ }}
+                port:
+                  name: {{ .port }}
+          {{- end }}
+{{- end }}
